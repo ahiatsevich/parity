@@ -20,7 +20,7 @@
 use std::sync::Weak;
 
 use bytes::Bytes;
-use ethereum_types::{H256, Address};
+use ethereum_types::{H256, U256, Address};
 use parking_lot::RwLock;
 
 use client::EngineClient;
@@ -100,6 +100,10 @@ impl ValidatorSet for ValidatorContract {
 
 	fn contains_with_caller(&self, bh: &H256, address: &Address, caller: &Call) -> bool {
 		self.validators.contains_with_caller(bh, address, caller)
+	}
+
+	fn get_reward_with_caller(&self, bh: &H256, address: &Address, caller: &Call) -> U256 {
+		self.validators.get_reward_with_caller(bh, address, caller)
 	}
 
 	fn get_with_caller(&self, bh: &H256, nonce: usize, caller: &Call) -> Address {

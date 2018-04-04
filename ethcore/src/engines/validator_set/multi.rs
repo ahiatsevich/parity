@@ -18,7 +18,7 @@
 
 use std::collections::BTreeMap;
 use std::sync::Weak;
-use ethereum_types::{H256, Address};
+use ethereum_types::{H256, U256, Address};
 use parking_lot::RwLock;
 use bytes::Bytes;
 use ids::BlockId;
@@ -111,6 +111,11 @@ impl ValidatorSet for Multi {
 	fn contains_with_caller(&self, bh: &H256, address: &Address, caller: &Call) -> bool {
 		self.correct_set(BlockId::Hash(*bh))
 			.map_or(false, |set| set.contains_with_caller(bh, address, caller))
+	}
+
+	fn get_reward_with_caller(&self, bh: &H256, address: &Address, caller: &Call) -> U256 {
+		self.correct_set(BlockId::Hash(*bh))
+			.map_or(U256::default(), |set| set.get_reward_with_caller(bh, address, caller))
 	}
 
 	fn get_with_caller(&self, bh: &H256, nonce: usize, caller: &Call) -> Address {

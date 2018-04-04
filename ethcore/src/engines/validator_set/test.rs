@@ -20,7 +20,7 @@ use std::str::FromStr;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering as AtomicOrdering};
 use heapsize::HeapSizeOf;
-use ethereum_types::{H256, Address};
+use ethereum_types::{H256, U256, Address};
 use bytes::Bytes;
 
 use machine::{AuxiliaryData, Call, EthereumMachine};
@@ -69,6 +69,10 @@ impl ValidatorSet for TestSet {
 
 	fn contains_with_caller(&self, bh: &H256, address: &Address, _: &Call) -> bool {
 		self.validator.contains(bh, address)
+	}
+
+	fn get_reward_with_caller(&self, bh: &H256, address: &Address, _: &Call) -> U256 {
+		self.validator.get_reward(bh, address)
 	}
 
 	fn get_with_caller(&self, bh: &H256, nonce: usize, _: &Call) -> Address {

@@ -17,7 +17,7 @@
 /// Preconfigured validator list.
 
 use heapsize::HeapSizeOf;
-use ethereum_types::{H256, Address};
+use ethereum_types::{H256, U256, Address};
 
 use machine::{AuxiliaryData, Call, EthereumMachine};
 use header::{BlockNumber, Header};
@@ -87,6 +87,10 @@ impl ValidatorSet for SimpleList {
 
 	fn contains_with_caller(&self, _bh: &H256, address: &Address, _: &Call) -> bool {
 		self.validators.contains(address)
+	}
+
+	fn get_reward_with_caller(&self, _bh: &H256, address: &Address, _: &Call) -> U256 {
+		self.get_reward(_bh, address)
 	}
 
 	fn get_with_caller(&self, _bh: &H256, nonce: usize, _: &Call) -> Address {

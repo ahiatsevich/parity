@@ -211,16 +211,37 @@ impl ValidatorSafeContract {
 
 	/// Queries the state and gets the set of validators.
 	fn get_list(&self, caller: &Call) -> Option<SimpleList> {
+		// @ahiatsevich: get validators
 		let contract_address = self.contract_address;
 		let caller = move |data| caller(contract_address, data).map(|x| x.0);
 		match self.provider.functions().get_validators().call(&caller) {
 			Ok(new) => {
 				debug!(target: "engine", "Set of validators obtained: {:?}", new);
+				println!("Set of validators obtained: {:?}", new);
 				Some(SimpleList::new(new))
 			},
 			Err(s) => {
 				debug!(target: "engine", "Set of validators could not be updated: {}", s);
 				None
+			},
+		}
+	}
+
+	/// Queries the state and gets the set of validators.
+	fn get_block_reward(&self, validator: &Address, caller: &Call) -> U256 {
+		// @ahiatsevich: get validators
+		let contract_address = self.contract_address;
+		let caller = move |data| caller(contract_address, data).map(|x| x.0);
+		match self.provider.functions().get_block_reward().call(&caller) {
+			Ok(block_reward) => {
+				debug!(target: "engine", "Block reward for validator {} obtained: {:?}", validator, block_reward);
+				println!("Block reward for validator {} obtained: {:?}", validator, block_reward);
+				block_reward
+			},
+			Err(s) => {
+				debug!(target: "engine", "Block reward for validator {} could not be fetched {}", validator, s);
+				println!("Block reward for validator {} could not be fetched {}", validator, s);
+				U256::default()
 			},
 		}
 	}
@@ -320,7 +341,7 @@ impl ValidatorSet for ValidatorSafeContract {
 	{
 		let receipts = aux.receipts;
 
-		// transition to the first block of a contract requires finality but has no log event.
+		// @ahiatsevich transition to the first block of a contract requires finality but has no log event.
 		if first {
 			debug!(target: "engine", "signalling transition to fresh contract.");
 			let state_proof = Arc::new(StateProof {
@@ -410,6 +431,10 @@ impl ValidatorSet for ValidatorSafeContract {
 				 }))
 	}
 
+	fn get_reward_with_caller(&self, parent_block_hash: &H256, address: &Address, caller: &Call) -> U256 {
+		self.get_block_reward(address, caller)
+	}
+
 	fn get_with_caller(&self, block_hash: &H256, nonce: usize, caller: &Call) -> Address {
 		let mut guard = self.validators.write();
 		let maybe_existing = guard
@@ -465,12 +490,23 @@ mod tests {
 
 	#[test]
 	fn fetches_validators() {
+		//@todo: ahiatsevich
+		println!("fetches_validators test execution...");
+
 		let client = generate_dummy_client_with_spec_and_accounts(Spec::new_validator_safe_contract, None);
+
+		println!("fetches_validators test execution 2...");
 		let vc = Arc::new(ValidatorSafeContract::new("0000000000000000000000000000000000000005".parse::<Address>().unwrap()));
+		println!("fetches_validators test execution 3...");
 		vc.register_client(Arc::downgrade(&client) as _);
+		println!("fetches_validators test execution 4...");
 		let last_hash = client.best_block_header().hash();
+		println!("fetches_validators test execution 5...");
 		assert!(vc.contains(&last_hash, &"7d577a597b2742b498cb5cf0c26cdcd726d39e6e".parse::<Address>().unwrap()));
+		println!("fetches_validators test execution 6...");
 		assert!(vc.contains(&last_hash, &"82a978b3f5962a5b0957d9ee9eef472ee55b42f1".parse::<Address>().unwrap()));
+		let reward = vc.get_reward(&last_hash, &"82a978b3f5962a5b0957d9ee9eef472ee55b42f1".parse::<Address>().unwrap());
+		println!("Rewards is {}", reward);
 	}
 
 	#[test]

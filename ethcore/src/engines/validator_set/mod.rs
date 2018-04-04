@@ -25,7 +25,7 @@ mod multi;
 
 use std::sync::Weak;
 use ids::BlockId;
-use ethereum_types::{H256, Address};
+use ethereum_types::{H256, U256, Address};
 use bytes::Bytes;
 use ethjson::spec::ValidatorSet as ValidatorSpec;
 use client::EngineClient;
@@ -66,6 +66,13 @@ pub trait ValidatorSet: Send + Sync {
 	fn contains(&self, parent: &H256, address: &Address) -> bool {
 		let default = self.default_caller(BlockId::Hash(*parent));
 		self.contains_with_caller(parent, address, &*default)
+	}
+
+	///
+	///
+	fn get_reward(&self, parent: &H256, address: &Address) -> U256 {
+		let default = self.default_caller(BlockId::Hash(*parent));
+		self.get_reward_with_caller(parent, address, &*default)
 	}
 
 	/// Draws an validator nonce modulo number of validators.
@@ -128,6 +135,10 @@ pub trait ValidatorSet: Send + Sync {
 	/// Checks if a given address is a validator, with the given function
 	/// for executing synchronous calls to contracts.
 	fn contains_with_caller(&self, parent_block_hash: &H256, address: &Address, caller: &Call) -> bool;
+
+	///
+	/// @ahiatsevich
+	fn get_reward_with_caller(&self, parent_block_hash: &H256, address: &Address, caller: &Call) -> U256;
 
 	/// Draws an validator nonce modulo number of validators.
 	fn get_with_caller(&self, parent_block_hash: &H256, nonce: usize, caller: &Call) -> Address;
