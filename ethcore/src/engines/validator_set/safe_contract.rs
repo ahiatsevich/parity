@@ -37,6 +37,7 @@ use receipt::Receipt;
 
 use super::{SystemCall, ValidatorSet};
 use super::simple_list::SimpleList;
+use std::collections::HashMap;
 
 use_contract!(validator_set, "ValidatorSet", "res/contracts/validator_set.json");
 
@@ -77,6 +78,7 @@ impl ::engines::StateDependentProof<EthereumMachine> for StateProof {
 pub struct ValidatorSafeContract {
 	contract_address: Address,
 	validators: RwLock<MemoryLruCache<H256, SimpleList>>,
+	rewards: RwLock<HashMap<Address, U256>>,
 	provider: validator_set::ValidatorSet,
 	client: RwLock<Option<Weak<EngineClient>>>, // TODO [keorn]: remove
 }
@@ -94,7 +96,7 @@ fn encode_first_proof(header: &Header, state_items: &[Vec<u8>]) -> Bytes {
 
 // check a first proof: fetch the validator set at the given block.
 fn check_first_proof(machine: &EthereumMachine, provider: &validator_set::ValidatorSet, contract_address: Address, old_header: Header, state_items: &[DBValue])
-	-> Result<Vec<Address>, String>
+	-> Result<(Vec<Address>, Vec<U256>), String>
 {
 	use transaction::{Action, Transaction};
 
@@ -190,7 +192,7 @@ fn prove_initial(provider: &validator_set::ValidatorSet, contract_address: Addre
 		let proof = epoch_proof.into_inner().expect("epoch_proof always set after call; qed");
 
 		trace!(target: "engine", "obtained proof for initial set: {} validators, {} bytes",
-			validators.len(), proof.len());
+			validators.0.len(), proof.len());
 
 		info!(target: "engine", "Signal for switch to contract-based validator set.");
 		info!(target: "engine", "Initial contract validators: {:?}", validators);
@@ -204,44 +206,27 @@ impl ValidatorSafeContract {
 		ValidatorSafeContract {
 			contract_address,
 			validators: RwLock::new(MemoryLruCache::new(MEMOIZE_CAPACITY)),
+			rewards: RwLock::new(HashMap::new()),
 			provider: validator_set::ValidatorSet::default(),
 			client: RwLock::new(None),
 		}
 	}
 
 	/// Queries the state and gets the set of validators.
-	fn get_list(&self, caller: &Call) -> Option<SimpleList> {
+	fn get_list(&self, caller: &Call) -> Option<(SimpleList, Vec<U256>)> {
 		// @ahiatsevich: get validators
 		let contract_address = self.contract_address;
 		let caller = move |data| caller(contract_address, data).map(|x| x.0);
 		match self.provider.functions().get_validators().call(&caller) {
 			Ok(new) => {
-				debug!(target: "engine", "Set of validators obtained: {:?}", new);
-				println!("Set of validators obtained: {:?}", new);
-				Some(SimpleList::new(new))
+				debug!(target: "engine", "Set of validators obtained: {:?}", new.0);
+				println!("Set of validators obtained: {:?}", new.0);
+				println!("Set of rewards obtained: {:?}", new.1);
+				Some((SimpleList::new(new.0), new.1))
 			},
 			Err(s) => {
 				debug!(target: "engine", "Set of validators could not be updated: {}", s);
 				None
-			},
-		}
-	}
-
-	/// Queries the state and gets the set of validators.
-	fn get_block_reward(&self, validator: &Address, caller: &Call) -> U256 {
-		// @ahiatsevich: get validators
-		let contract_address = self.contract_address;
-		let caller = move |data| caller(contract_address, data).map(|x| x.0);
-		match self.provider.functions().get_block_reward().call(&caller) {
-			Ok(block_reward) => {
-				debug!(target: "engine", "Block reward for validator {} obtained: {:?}", validator, block_reward);
-				println!("Block reward for validator {} obtained: {:?}", validator, block_reward);
-				block_reward
-			},
-			Err(s) => {
-				debug!(target: "engine", "Block reward for validator {} could not be fetched {}", validator, s);
-				println!("Block reward for validator {} could not be fetched {}", validator, s);
-				U256::default()
 			},
 		}
 	}
@@ -386,11 +371,11 @@ impl ValidatorSet for ValidatorSafeContract {
 			let (old_header, state_items) = decode_first_proof(&rlp)?;
 			let number = old_header.number();
 			let old_hash = old_header.hash();
-			let addresses = check_first_proof(machine, &self.provider, self.contract_address, old_header, &state_items)
+			let validatorData = check_first_proof(machine, &self.provider, self.contract_address, old_header, &state_items)
 				.map_err(::engines::EngineError::InsufficientProof)?;
 
-			trace!(target: "engine", "extracted epoch set at #{}: {} addresses",
-				number, addresses.len());
+			let addresses = validatorData.0;
+			trace!(target: "engine", "extracted epoch set at #{}: {} addresses", number, addresses.len());
 
 			Ok((SimpleList::new(addresses), Some(old_hash)))
 		} else {
@@ -425,14 +410,29 @@ impl ValidatorSet for ValidatorSafeContract {
 			.unwrap_or_else(|| self
 				.get_list(caller)
 				.map_or(false, |list| {
-					let contains = list.contains(block_hash, address);
-					guard.insert(block_hash.clone(), list);
+					let contains = list.0.contains(block_hash, address);
+
+					guard.insert(block_hash.clone(), list.0.clone());
+
+					self.rewards.write().clear();
+					for (i, v) in list.0.into_inner().iter().enumerate() {
+						self.rewards.write().insert(*v, list.1[i]);
+					}
+
 					contains
 				 }))
 	}
 
 	fn get_reward_with_caller(&self, parent_block_hash: &H256, address: &Address, caller: &Call) -> U256 {
-		self.get_block_reward(address, caller)
+		if self.contains_with_caller(parent_block_hash, address, caller) {
+			if let Some(reward) = self.rewards.read().get(address) {
+				*reward
+			} else {
+				U256::default()
+			}
+		} else {
+			U256::default()
+		}
 	}
 
 	fn get_with_caller(&self, block_hash: &H256, nonce: usize, caller: &Call) -> Address {
@@ -444,8 +444,15 @@ impl ValidatorSet for ValidatorSafeContract {
 			.unwrap_or_else(|| self
 				.get_list(caller)
 				.map_or_else(Default::default, |list| {
-					let address = list.get(block_hash, nonce);
-					guard.insert(block_hash.clone(), list);
+					let address = list.0.get(block_hash, nonce);
+
+					guard.insert(block_hash.clone(), list.0.clone());
+
+					self.rewards.write().clear();
+					for (i, v) in list.0.into_inner().iter().enumerate() {
+						self.rewards.write().insert(*v, list.1[i]);
+					}
+
 					address
 				 }))
 	}
@@ -459,8 +466,14 @@ impl ValidatorSet for ValidatorSafeContract {
 			.unwrap_or_else(|| self
 				.get_list(caller)
 				.map_or_else(usize::max_value, |list| {
-					let address = list.count(block_hash);
-					guard.insert(block_hash.clone(), list);
+					let address = list.0.count(block_hash);
+					guard.insert(block_hash.clone(), list.0.clone());
+
+					self.rewards.write().clear();
+					for (i, v) in list.0.into_inner().iter().enumerate() {
+						self.rewards.write().insert(*v, list.1[i]);
+					}
+
 					address
 				 }))
 	}
@@ -502,6 +515,9 @@ mod tests {
 		println!("fetches_validators test execution 4...");
 		let last_hash = client.best_block_header().hash();
 		println!("fetches_validators test execution 5...");
+		let reward1 = vc.get_reward(&last_hash, &"7d577a597b2742b498cb5cf0c26cdcd726d39e6e".parse::<Address>().unwrap());
+		println!("Rewards is {}", reward1);
+
 		assert!(vc.contains(&last_hash, &"7d577a597b2742b498cb5cf0c26cdcd726d39e6e".parse::<Address>().unwrap()));
 		println!("fetches_validators test execution 6...");
 		assert!(vc.contains(&last_hash, &"82a978b3f5962a5b0957d9ee9eef472ee55b42f1".parse::<Address>().unwrap()));

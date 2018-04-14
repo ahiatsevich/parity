@@ -730,6 +730,7 @@ impl Engine<EthereumMachine> for AuthorityRound {
 	}
 
 	fn step(&self) {
+		// TODO: @ahiatsevich
 		self.step.increment();
 		self.can_propose.store(true, AtomicOrdering::SeqCst);
 		if let Some(ref weak) = *self.client.read() {
@@ -994,15 +995,21 @@ impl Engine<EthereumMachine> for AuthorityRound {
 
 			for empty_step in empty_steps {
 				let author = empty_step.author()?;
-				rewards.push((author, self.block_reward));
+				let reward : U256 = self.validators.get_reward(block.header().parent_hash(), block.header().author());
+				rewards.push((author, reward));
+				println!("rewards push empty (loop): {} / {}", author, reward);
 			}
 		}
 
 		let author = *block.header().author();
-		rewards.push((author, self.block_reward));
+		let reward : U256 = self.validators.get_reward(block.header().parent_hash(), block.header().author());
+
+		rewards.push((author, reward));
+		println!("rewards push: {} / {}", author, reward);
 
 		for &(ref author, ref block_reward) in rewards.iter() {
 			self.machine.add_balance(block, author, block_reward)?;
+			println!("add_balance (loop): {} / {}", author, block_reward);
 		}
 		self.machine.note_rewards(block, &rewards, &[])
 	}

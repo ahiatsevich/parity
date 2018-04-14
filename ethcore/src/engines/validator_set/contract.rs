@@ -184,7 +184,9 @@ mod tests {
 		header.set_number(2);
 		header.set_parent_hash(client.chain_info().best_block_hash);
 		assert!(client.engine().verify_block_external(&header).is_err());
+		println!("engine step #1");
 		client.engine().step();
+		println!("engine step #2");
 		assert_eq!(client.chain_info().best_block_number, 0);
 
 		// Now create one that is more in future. That one should be rejected and validator should be reported.
